@@ -26,7 +26,12 @@ contract Stasher is IMultiSigWallet {
 
     event SignTransaction(
         address indexed signer,
-        uint256 transactionId
+        uint256 indexed transactionId
+    );
+
+    event TransactionStatusChange(
+        uint256 indexed transactionId,
+        TransactionStatus indexed status
     );
 
     modifier authorizedSigner() {
@@ -48,6 +53,7 @@ contract Stasher is IMultiSigWallet {
     uint256 private constant SIGNER_THRESHOLD = 3;
     mapping(uint256 txnId => Transaction) private transactions;
     mapping(uint256 txnId => mapping(address => bool)) transactionSignatories;
+    uint256 transactionCount;
 
     function addSigner(address signer) override external limitSigners {
         if (!authorizedSigners[signer]) {
@@ -72,7 +78,7 @@ contract Stasher is IMultiSigWallet {
             Transaction memory txn = Transaction({
                 destination: destination,
                 amount: amount,
-                transactionId: 0,
+                transactionId: transactionCount++,
                 timestamp: block.timestamp,
                 status: TransactionStatus.PROPOSED,
                 confirmations: 0
@@ -94,6 +100,8 @@ contract Stasher is IMultiSigWallet {
 
     function sendTransaction(uint256 transactionId) override external {
         Transaction storage txn = transactions[transactionId];
+        txn.status = TransactionStatus.PENDING;
+        emit TransactionStatusChange(txn.transactionId, txn.status);
         if (txn.confirmations < SIGNER_THRESHOLD) revert Stasher__NotEnoughSignatories();
 
         (bool isSuccess, ) = payable(txn.destination).call {
@@ -101,13 +109,17 @@ contract Stasher is IMultiSigWallet {
         }("");
 
         if (!isSuccess) revert Stasher__TransactionFailed();
+        else {
+            txn.status = TransactionStatus.SENT;
+            emit TransactionStatusChange(txn.transactionId, txn.status);
+        }
     }
 
     function _validateTransaction(Transaction memory txn) private view {
-        if (txn.amount > address(this).balance) revert Stasher__InsufficientFunds();
         if (txn.transactionId == 0) revert Stasher__InvalidTransaction();
-        if (txn.amount <= 0) revert Stasher__InvalidAmount();
-        if (txn.destination == address(0)) revert Stasher__InvalidAddress();
         if (transactions[txn.transactionId].transactionId != 0) revert Stasher__TransactionAlreadyExists();
+        if (txn.amount <= 0) revert Stasher__InvalidAmount();
+        if (txn.amount > address(this).balance) revert Stasher__InsufficientFunds();
+        if (txn.destination == address(0)) revert Stasher__InvalidAddress();
     }
 }
