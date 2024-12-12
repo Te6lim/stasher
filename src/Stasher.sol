@@ -17,7 +17,7 @@ contract Stasher is IMultiSigWallet {
     error Stasher__NotEnoughSignatories();
     error Stasher__TransactionFailed();
 
-    event TransactionPropsal(
+    event TransactionProposal(
         uint256 indexed transactionId,
         address indexed proposer,
         address indexed destinationAddress,
@@ -50,7 +50,7 @@ contract Stasher is IMultiSigWallet {
     mapping(address => bool) private authorizedSigners;
     uint256 private numberOfRequiredSignatures;
     uint256 private constant MAX_SIGNERS = 5;
-    uint256 private constant SIGNER_THRESHOLD = 3;
+    uint256 private constant MINIMUN_SIGNERS_FOR_A_TRANSACTION = 3;
     mapping(uint256 txnId => Transaction) private transactions;
     mapping(uint256 txnId => mapping(address => bool)) transactionSignatories;
     uint256 transactionCount;
@@ -78,19 +78,20 @@ contract Stasher is IMultiSigWallet {
             Transaction memory txn = Transaction({
                 destination: destination,
                 amount: amount,
-                transactionId: transactionCount++,
+                transactionId: ++transactionCount,
                 timestamp: block.timestamp,
                 status: TransactionStatus.PROPOSED,
                 confirmations: 0
             });
             _validateTransaction(txn);
             transactions[txn.transactionId] = txn;
-            this.signTransaction(txn.transactionId);
-            emit TransactionPropsal(txn.transactionId, msg.sender, txn.destination, txn.amount);
+            signTransaction(txn.transactionId);
+            emit TransactionProposal(txn.transactionId, msg.sender, txn.destination, txn.amount);
             transactionId = txn.transactionId;
+            return transactionId;
     }
 
-    function signTransaction(uint256 transactionId) override external authorizedSigner {
+    function signTransaction(uint256 transactionId) override public authorizedSigner {
         Transaction storage txn = transactions[transactionId];
         if (transactionSignatories[transactionId][msg.sender]) revert Stasher__SignerAlreadySigned();
         transactionSignatories[transactionId][msg.sender] = true;
@@ -98,12 +99,11 @@ contract Stasher is IMultiSigWallet {
         emit SignTransaction(msg.sender, transactionId);
     }
 
-    function sendTransaction(uint256 transactionId) override external {
+    function sendTransaction(uint256 transactionId) override public {
         Transaction storage txn = transactions[transactionId];
+        if (txn.confirmations < MINIMUN_SIGNERS_FOR_A_TRANSACTION) revert Stasher__NotEnoughSignatories();
         txn.status = TransactionStatus.PENDING;
         emit TransactionStatusChange(txn.transactionId, txn.status);
-        if (txn.confirmations < SIGNER_THRESHOLD) revert Stasher__NotEnoughSignatories();
-
         (bool isSuccess, ) = payable(txn.destination).call {
             value: txn.amount
         }("");
@@ -121,5 +121,21 @@ contract Stasher is IMultiSigWallet {
         if (txn.amount <= 0) revert Stasher__InvalidAmount();
         if (txn.amount > address(this).balance) revert Stasher__InsufficientFunds();
         if (txn.destination == address(0)) revert Stasher__InvalidAddress();
+    }
+
+    function isAddressAuthorized(address signer) public view returns(bool) {
+        return authorizedSigners[signer];
+    }
+
+    function getNumberOfSignatures() public view returns(uint256) {
+        return numberOfRequiredSignatures;
+    }
+
+    function getTransactionById(uint256 txnId) external view returns(Transaction memory) {
+        return transactions[txnId];
+    }
+
+    function hasUserSignedTransaction(address signer, uint256 transactionId) external view returns(bool) {
+        return transactionSignatories[transactionId][signer];
     }
 }
