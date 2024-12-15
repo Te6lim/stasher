@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IMultiSigWallet} from "src/interfaces/IMultiSigWallet.sol";
 import {Transaction, TransactionStatus} from "src/models/Transaction.sol";
+import {AggregatorV2V3Interface} from "lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV2V3Interface.sol";
 
 contract Stasher is IMultiSigWallet {
 
@@ -54,6 +55,15 @@ contract Stasher is IMultiSigWallet {
     mapping(uint256 txnId => Transaction) private transactions;
     mapping(uint256 txnId => mapping(address => bool)) transactionSignatories;
     uint256 transactionCount;
+    address private ethUsdPriceFeed;
+    uint256 balanceInUsd;
+    uint256 private constant PRECISION_PADDING = 10e10;
+    uint256 private constant PRECISION = 10e18;
+
+    constructor(address priceFeed) {
+        ethUsdPriceFeed = priceFeed;
+        balanceInUsd = getAmountInUSD(address(this).balance);
+    }
 
     function addSigner(address signer) override external limitSigners {
         if (!authorizedSigners[signer]) {
@@ -111,8 +121,16 @@ contract Stasher is IMultiSigWallet {
         if (!isSuccess) revert Stasher__TransactionFailed();
         else {
             txn.status = TransactionStatus.SENT;
+            balanceInUsd = getAmountInUSD(address(this).balance);
             emit TransactionStatusChange(txn.transactionId, txn.status);
         }
+    }
+
+    function getAmountInUSD(uint256 amount) public view returns (uint256) {
+        AggregatorV2V3Interface priceFeedAggregator = AggregatorV2V3Interface(ethUsdPriceFeed);
+        (, int256 price,,,) = priceFeedAggregator.latestRoundData();
+        uint256 convertedAmount = (uint256(price) * PRECISION_PADDING * amount) / PRECISION;
+        return convertedAmount;
     }
 
     function _validateTransaction(Transaction memory txn) private view {

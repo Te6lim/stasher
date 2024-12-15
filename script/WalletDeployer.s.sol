@@ -10,11 +10,10 @@ contract WalletDeployer is Script {
     Stasher private wallet;
 
     function run() external returns(Stasher, HelperConfig.NetworkConfig memory) {
-        vm.startBroadcast();
-        wallet = new Stasher();
-        vm.stopBroadcast();
         HelperConfig.NetworkConfig memory config = new HelperConfig().getActiveNetworkConfig();
+        vm.startBroadcast();
+        wallet = new Stasher(config.ethPriceFeed);
+        vm.stopBroadcast();
         return (wallet, config);
-        
     }
 }
